@@ -21,51 +21,63 @@ D8    ->   DATA (DHT11)
 #include <EEPROM.h>
 
 //------------------------------- nastaveni programu ----------------------------------
-#define delay_interval 5000                     // cas pro automaticke stridani udaju na LCD v ms
-#define typDHT DHT11                            // definice pouzivaneho DHT senzoru (DHT11 nebo DHT22)
-unsigned long INTERVAL = 86400000;              // doba v ms, kdy si ma pamatovat min/max teploty
+#define delay_interval 5000                       // cas pro automaticke stridani udaju na LCD v ms
+#define typDHT DHT11                              // definice pouzivaneho DHT senzoru (DHT11 nebo DHT22)
+unsigned long INTERVAL = 86400000;                // doba v ms, kdy si ma pamatovat min/max teploty
 //---------------------------- konec nastaveni programu -------------------------------
 
 
-#define BUTTON 2                                // tlacitko na pomocne desce
-#define R_LED 3                                 // cervena LED na pomocne desce
-#define G_LED1 4                                // zelena LED1 na pomocne desce
-#define G_LED2 5                                // zelena LED2 na pomocne desce
-#define DIO 6                                   // piny pro LCD
+#define BUTTON 2                                  // tlacitko na pomocne desce
+#define R_LED 3                                   // cervena LED na pomocne desce
+#define G_LED1 4                                  // zelena LED1 na pomocne desce
+#define G_LED2 5                                  // zelena LED2 na pomocne desce
+#define DIO 6                                     // piny pro LCD
 #define CLK 7
-#define pinDHT 8                                // datovy pin pro data z senzoru DHT11
-#define L_LED 13                                // vestavena LED
+#define pinDHT 8                                  // datovy pin pro data z senzoru DHT11
+#define L_LED 13                                  // vestavena LED
 
-DHT mojeDHT(pinDHT, typDHT);                    // inicializace DHT senzoru
-TM1637Display displej(CLK,DIO);                 // inicializace LCD
-void zapis_LCD(int teplota_vlhkost, int value); // deklarace funkce pro zapis na LCD
-void extint_button();                           // deklarace funkce pro obsluhu tlacitka z preruseni
-float TEP;                                      // promenne pro ulozeni teploty a vlhkosti
+DHT mojeDHT(pinDHT, typDHT);                      // inicializace DHT senzoru
+TM1637Display displej(CLK,DIO);                   // inicializace LCD
+void zapis_LCD(int teplota_vlhkost, int value);   // deklarace funkce pro zapis na LCD
+void extint_button();                             // deklarace funkce pro obsluhu tlacitka z preruseni
+float TEP;                                        // promenne pro ulozeni teploty a vlhkosti
 float VLH;
-volatile int CURRENT_TEMP_INT;                  // promenne pro ulozeni aktualni teploty a vlhkosti
+volatile int CURRENT_TEMP_INT;                    // promenne pro ulozeni aktualni teploty a vlhkosti (volatile kvuli preruseni)
 int CURRENT_VLH_INT;
 int LOW_TEMP_ALL_TIME;
 int HIGH_TEMP_ALL_TIME;
 int LOW_TEMP_INTERVAL;
 int HIGH_TEMP_INTERVAL;
-unsigned long TIME_STAMP_MIN_TEMP = 0;         // casovy okamzik, kdy zapise novou min teplotu
-unsigned long TIME_STAMP_MAX_TEMP = 0;         // casovy okamzik, kdy zapise novou max teplotu
-bool FIRST_MEASUREMENT;                        // promenna, ktera indikuje prvni pruchod mereni po startu MCU
-volatile byte CURRENT_STATE;                   // promenna, podle ktere se v programu pozna co se zrovna vypisuje
-                                               // musi byt volatile, aby se pamatovala i v preruseni
-const uint8_t ERR2[] = {                       // napis ERR2 pro indikaci poruchy cidla DHT11
-  SEG_A | SEG_D | SEG_E | SEG_F | SEG_G,       // pismeno "E"
-  SEG_E | SEG_G,                               // pismeno "r"
-  SEG_E | SEG_G,                               // pismeno "r"
-  SEG_A | SEG_B | SEG_D | SEG_E | SEG_G        // cislice "2"
+unsigned long TIME_STAMP_MIN_TEMP = 0;            // casovy okamzik, kdy zapise novou min teplotu
+unsigned long TIME_STAMP_MAX_TEMP = 0;            // casovy okamzik, kdy zapise novou max teplotu
+bool FIRST_MEASUREMENT;                           // promenna, ktera indikuje prvni pruchod mereni po startu MCU
+volatile bool UNDERVOLT_ACCU;                     // promenna pro rezim detekce podpeti "Accu"
+volatile byte CURRENT_STATE;                      // promenna, podle ktere se v programu pozna co se zrovna vypisuje (volatile kvuli preruseni)
+const uint8_t ERR2[] = {                          // napis "ERR2" pro indikaci poruchy cidla DHT
+  SEG_A | SEG_D | SEG_E | SEG_F | SEG_G,          // pismeno "E"
+  SEG_E | SEG_G,                                  // pismeno "r"
+  SEG_E | SEG_G,                                  // pismeno "r"
+  SEG_A | SEG_B | SEG_D | SEG_E | SEG_G           // cislice "2"
 };
-const uint8_t celsius[] = {                    // Symbol "°C" pro zobrazeni teploty na LCD
-  SEG_A | SEG_B | SEG_F | SEG_G,               // znak "°"
-  SEG_A | SEG_D | SEG_E | SEG_F                // pismeno "C"
+const uint8_t celsius[] = {                       // Symbol "°C" pro zobrazeni teploty na LCD
+  SEG_A | SEG_B | SEG_F | SEG_G,                  // znak "°"
+  SEG_A | SEG_D | SEG_E | SEG_F                   // pismeno "C"
 };
-const uint8_t rh[] = {                         // Symbol "rh" pro zobrazeni vlhkosti na LCD
-  SEG_E | SEG_G,                               // pismeno "r"
-  SEG_C | SEG_E | SEG_F | SEG_G                // pismeno "h"
+const uint8_t rh[] = {                            // Symbol "rh" pro zobrazeni vlhkosti na LCD
+  SEG_E | SEG_G,                                  // pismeno "r"
+  SEG_C | SEG_E | SEG_F | SEG_G                   // pismeno "h"
+};
+const uint8_t accu[] = {                          // napis "Accu" pro indikaci rezimu hlidani napeti
+  SEG_A | SEG_B | SEG_C | SEG_E | SEG_F | SEG_G,  // pismeno "A"
+  SEG_D | SEG_E | SEG_G,                          // pismeno "c"
+  SEG_D | SEG_E | SEG_G,                          // pismeno "c"
+  SEG_C | SEG_D | SEG_E                           // pismeno "u"
+};
+const uint8_t lipo[] = {                          // napis "LiPo" pro indikaci rezimu hlidani napeti
+  SEG_D | SEG_E | SEG_F,                          // pismeno "L"
+  SEG_E,                                          // pismeno "i"
+  SEG_A | SEG_B | SEG_E | SEG_F| SEG_G,           // pismeno "P"
+  SEG_C | SEG_D | SEG_E | SEG_G                   // pismeno "o"
 };
 // same carky na LCD pro potvrzeni smazani EEPROM "----"
 const uint8_t erase[] = {SEG_G, SEG_G, SEG_G, SEG_G};  // znaky "----"
@@ -101,6 +113,7 @@ void setup() {
   LOW_TEMP_ALL_TIME = EEPROM.read(0);          // nacti z EEPROM nejnizsi doposud dosazenou teplotu
   HIGH_TEMP_ALL_TIME = EEPROM.read(1);         // nacti z EEPROM nejvyssi doposud dosazenou teplotu
   FIRST_MEASUREMENT = true;
+  UNDERVOLT_ACCU = EEPROM.read(2);             // nacti z EEPROM rezim detekce podpeti
   attachInterrupt(0, extint_button, RISING);   // nastaveni externiho preruseni na pin D2 co bude volat funkci button
 }
 
@@ -128,10 +141,11 @@ void loop() {
   Serial.println(" %");
   CURRENT_TEMP_INT=TEP;                                   // prevod float hodnot na integer
   CURRENT_VLH_INT=VLH;
-  CURRENT_STATE = 1;                                      // 1 = vypis aktualnich hodnot (obrazovka 1)
   zapis_LCD(0, CURRENT_TEMP_INT);
+  CURRENT_STATE = 10;                                     // 10 = vypis aktualni teploty
   delay(delay_interval);
   zapis_LCD(1, CURRENT_VLH_INT);
+  CURRENT_STATE = 11;                                     // 11 = vypis aktualni vlhkosti
   delay(delay_interval);
   CURRENT_STATE = 255;
 
@@ -197,6 +211,15 @@ void extint_button(){
   detachInterrupt(0);                           // deaktivuje dalsi preruseni
   if(digitalRead(BUTTON) == HIGH){              // je stale stisknuto tlacitko ?
     switch (CURRENT_STATE){
+      case 11:                                  // zrovna se vypisovala aktualni vlhkost
+        UNDERVOLT_ACCU = !UNDERVOLT_ACCU;       // zmen rezim detekce podpeti
+        EEPROM.write(2, UNDERVOLT_ACCU);        // zapis novy rezim do EEPROM
+        if(UNDERVOLT_ACCU == true){
+          displej.setSegments(accu, 4, 0);      // vypis na LCD "Accu"
+        }else{
+          displej.setSegments(lipo, 4, 0);      // vypis na LCD "LiPo"
+        }
+      break;      
       case 20:                                  // zrovna se vypisovala nejnizsi teplota za INTERVAL
         displej.setSegments(erase, 4, 0);       // vypis na LCD "----"
         LOW_TEMP_INTERVAL = CURRENT_TEMP_INT;   // znovu inicializuj nejnizsi teplotu za INTERVAL podle aktualni
