@@ -66,7 +66,7 @@ void setup() {
   digitalWrite(L_LED,HIGH); 
   mojeDHT.begin();                            // zahajeni komunikace s DHT
   Serial.begin(9600);                         // otevreni serioveho kanalu pro monitorovani
-  displej.setBrightness(10);                  // nastaveni svitivosti LCD (8(min) - 15(max))
+  displej.setBrightness(8);                  // nastaveni svitivosti LCD (8(min) - 15(max))
   delay(500);
   digitalWrite(R_LED,LOW);                  
   digitalWrite(G_LED1,LOW);
