@@ -38,9 +38,8 @@ DHT mojeDHT(pinDHT, typDHT);                  // inicializace DHT senzoru
 TM1637Display displej(CLK,DIO);               // inicializace LCD
 float TEP;                                    // promenne pro ulozeni teploty a vlhkosti
 float VLH;
-int I_TEP;
-int I_VLH;
-uint8_t vypisLCD[] = { 0, 0, 0, 0 };             // pole hodnot pro jednotlive pozice displeje
+int TEMP_INT;
+int VLH_INT;
 // napis ERR2 pro indikaci poruchy cidla DHT11
 const uint8_t ERR2[] = {
   SEG_A | SEG_D | SEG_E | SEG_F | SEG_G,      // pismeno "E"
@@ -48,6 +47,17 @@ const uint8_t ERR2[] = {
   SEG_E | SEG_G,                              // pismeno "r"
   SEG_A | SEG_B | SEG_D | SEG_E | SEG_G       // cislice "2"
 };
+// Symbol "°C" pro zobrazeni teploty na LCD
+const uint8_t celsius[] = {
+  SEG_A | SEG_B | SEG_F | SEG_G,              // znak "°"
+  SEG_A | SEG_D | SEG_E | SEG_F               // pismeno "C"
+};
+// Symbol "rh" pro zobrazeni vlhkosti na LCD
+const uint8_t rh[] = {
+  SEG_E | SEG_G,                              // pismeno "r"
+  SEG_C | SEG_E | SEG_F | SEG_G               // pismeno "h"
+};
+
 
 void setup() {
   // nastaveni I/O
@@ -84,7 +94,7 @@ void loop() {
   digitalWrite(L_LED,LOW);
 
   if (isnan(TEP) || isnan(VLH)) {                 // kontrola, jestli jsou nactené hodnoty cisla pomocí funkce isnan
-    Serial.print("porucha senzoru: ");            // pokud ne, vypis chybu na seriovy terminal
+    Serial.print("porucha senzoru: DHT");            // pokud ne, vypis chybu na seriovy terminal
     Serial.println(typDHT);
     displej.setSegments(ERR2);                    // a vypise chybu "Err2" na LCD display
   }else{
@@ -94,21 +104,23 @@ void loop() {
     Serial.print("vlhkost: ");
     Serial.print(VLH);
     Serial.println(" %");
-    I_TEP=TEP;
-    I_VLH=VLH;
-    // zpracovani vysledku a zobrazeni teploty 
-    vypisLCD[0]=120;                                 // pismeno "t"
-    vypisLCD[1]=121+128;                             // pismeno "E" s dvojteckou (to je hodnota 128)
-    vypisLCD[2]=displej.encodeDigit(I_TEP/10);
-    vypisLCD[3]=displej.encodeDigit(I_TEP%10);
-    displej.setSegments(vypisLCD);
+    TEMP_INT=TEP;                                 // prevod float hodnot na integer
+    VLH_INT=VLH;
+    if (TEMP_INT < 0) {
+      displej.showNumberDec(TEMP_INT, false, 3, 0);  // pokud je teplota mensi nez 0°C uprav vvypis na LCD pro znamenko "-"
+      displej.setSegments(celsius, 1, 3);
+    }else{
+      displej.showNumberDec(TEMP_INT, false, 2, 0);  // pokud je teplota 0°C a vyssi ponecha standardni vystup na LCD
+      displej.setSegments(celsius, 2, 2);
+    }
     delay(delay_interval);
-    // zpracovani vysledku a zobrazeni vlhkosti 
-    vypisLCD[0]=80;                                  // pismeno "r"
-    vypisLCD[1]=116+128;                             // pismeno "h" s dvojteckou (to je hodnota 128)
-    vypisLCD[2]=displej.encodeDigit(I_VLH/10);
-    vypisLCD[3]=displej.encodeDigit(I_VLH%10);
-    displej.setSegments(vypisLCD);
+    if (VLH_INT > 99) {                              
+      displej.showNumberDec(VLH_INT, false, 3, 0);   // pokud je vlhkost vetsi nez 99%, uprav vypis na LCD
+      displej.setSegments(rh, 1, 3);
+    }else{
+      displej.showNumberDec(VLH_INT, false, 2, 0);   // pokud je vlhkost 99% a nizsi ponecha standardni vystup na LCD
+      displej.setSegments(rh, 2, 2);
+    }
     delay(delay_interval);
   }
 
