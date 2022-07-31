@@ -44,10 +44,10 @@ float TEP;                                        // promenne pro ulozeni teplot
 float VLH;
 volatile int CURRENT_TEMP_INT;                    // promenne pro ulozeni aktualni teploty a vlhkosti (volatile kvuli preruseni)
 int CURRENT_VLH_INT;
-int LOW_TEMP_ALL_TIME;
-int HIGH_TEMP_ALL_TIME;
-int LOW_TEMP_INTERVAL;
-int HIGH_TEMP_INTERVAL;
+volatile int LOW_TEMP_ALL_TIME;
+volatile int HIGH_TEMP_ALL_TIME;
+volatile int LOW_TEMP_INTERVAL;
+volatile int HIGH_TEMP_INTERVAL;
 unsigned long TIME_STAMP_MIN_TEMP = 0;            // casovy okamzik, kdy zapise novou min teplotu
 unsigned long TIME_STAMP_MAX_TEMP = 0;            // casovy okamzik, kdy zapise novou max teplotu
 bool FIRST_MEASUREMENT;                           // promenna, ktera indikuje prvni pruchod mereni po startu MCU
@@ -228,13 +228,15 @@ void extint_button(){
         displej.setSegments(erase, 4, 0);       // vypis na LCD "----"
         HIGH_TEMP_INTERVAL = CURRENT_TEMP_INT;  // znovu inicializuj nejnizsi teplotu za INTERVAL podle aktualni
       break;      
-      case 30:                                   // zrovna se vypisovala obrazovka cislo 2 - vypis min/max teplot za zvoleny interval
+      case 30:                                   // zrovna se vypisovala nejnizsi absolutni namerena hodnota
         displej.setSegments(erase, 4, 0);        // vypis na LCD "----"
         EEPROM.write(0, CURRENT_TEMP_INT);       // znovu inicializuj nejnizsi absolutni teplotu z EEPROM podle aktualni
+        LOW_TEMP_ALL_TIME = CURRENT_TEMP_INT;    // aktualizuj promennou pro nejnizsi absolutni hodnotu teploty
       break;
-      case 31:                                   // zrovna se vypisovala obrazovka cislo 2 - vypis min/max teplot za zvoleny interval
+      case 31:                                   // zrovna se vypisovala nejvyssi absolutni namerena hodnota
         displej.setSegments(erase, 4, 0);        // vypis na LCD "----"
         EEPROM.write(1, CURRENT_TEMP_INT);       // znovu inicializuj nejvyssi absolutni teplotu z EEPROM podle aktualni
+        HIGH_TEMP_ALL_TIME = CURRENT_TEMP_INT;   // aktualizuj promennou pro nejvyssi absolutni hodnotu teploty
       break;
     default:
       break;
