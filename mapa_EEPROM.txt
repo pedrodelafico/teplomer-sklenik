@@ -1,0 +1,7 @@
+mapa EEPROM pro program registracniho teplomeru
+
+adresa      datovy typ          popis
+0           int                 nejnizsi zaznamenana teplota
+2           int                 nejvyssi zaznamenana teplota
+4           bool                indikator rezimu detekce podpeti "Accu"
+5           byte                typ pouziteho DHT senzoru

@@ -22,7 +22,6 @@ D8    ->   DATA (DHT11)
 
 //------------------------------- nastaveni programu ----------------------------------
 #define delay_interval 5000                       // cas pro automaticke stridani udaju na LCD v ms
-#define typDHT DHT11                              // definice pouzivaneho DHT senzoru (DHT11 nebo DHT22)
 unsigned long INTERVAL = 86400000;                // doba v ms, kdy si ma pamatovat min/max teploty
 //---------------------------- konec nastaveni programu -------------------------------
 
@@ -35,9 +34,14 @@ unsigned long INTERVAL = 86400000;                // doba v ms, kdy si ma pamato
 #define CLK 7
 #define pinDHT 8                                  // datovy pin pro data z senzoru DHT11
 #define L_LED 13                                  // vestavena LED
+#define ADR_EEPROM_ABSOLUTE_LOW 0                 // adresy EEPROM
+#define ADR_EEPROM_ABSOLUTE_HIGH 2
+#define ADR_EEPROM_UNDERVOLT_ACCU 4
+#define ADR_EEPROM_DHTSENZOR_TYPE 5
 
-DHT mojeDHT(pinDHT, typDHT);                      // inicializace DHT senzoru
-TM1637Display displej(CLK,DIO);                   // inicializace LCD
+DHT mojeDHT11(pinDHT, DHT11);                     // inicializace tridy DHT pro oba typy senzoru
+DHT mojeDHT22(pinDHT, DHT22);
+TM1637Display displej(CLK,DIO);                   // inicializace tridy pro obsluhu LCD dipsleje
 void zapis_LCD(int teplota_vlhkost, int value);   // deklarace funkce pro zapis na LCD
 void extint_button();                             // deklarace funkce pro obsluhu tlacitka z preruseni
 float TEP;                                        // promenne pro ulozeni teploty a vlhkosti
@@ -52,6 +56,7 @@ unsigned long TIME_STAMP_MIN_TEMP = 0;            // casovy okamzik, kdy zapise 
 unsigned long TIME_STAMP_MAX_TEMP = 0;            // casovy okamzik, kdy zapise novou max teplotu
 bool FIRST_MEASUREMENT;                           // promenna, ktera indikuje prvni pruchod mereni po startu MCU
 volatile bool UNDERVOLT_ACCU;                     // promenna pro rezim detekce podpeti "Accu"
+volatile byte DHT_SENSOR_TYPE;                    // promenna pro ulozeni typu DHT senzoru (11 nebo 22)
 volatile byte CURRENT_STATE;                      // promenna, podle ktere se v programu pozna co se zrovna vypisuje (volatile kvuli preruseni)
 const uint8_t ERR2[] = {                          // napis "ERR2" pro indikaci poruchy cidla DHT
   SEG_A | SEG_D | SEG_E | SEG_F | SEG_G,          // pismeno "E"
@@ -79,43 +84,67 @@ const uint8_t lipo[] = {                          // napis "LiPo" pro indikaci r
   SEG_A | SEG_B | SEG_E | SEG_F| SEG_G,           // pismeno "P"
   SEG_C | SEG_D | SEG_E | SEG_G                   // pismeno "o"
 };
+const uint8_t ht11[] = {                          // napis "Ht11" pro zvoleny typ teplotniho senzoru DHT11
+  SEG_B | SEG_C | SEG_E | SEG_F | SEG_G,          // pismeno "H"
+  SEG_D | SEG_E | SEG_F | SEG_G,                  // pismeno "t"
+  SEG_B | SEG_C,                                  // cislo "1"
+  SEG_B | SEG_C                                   // cislo "1"
+};
+const uint8_t ht22[] = {                          // napis "Ht22" pro zvoleny typ teplotniho senzoru DHT11
+  SEG_B | SEG_C | SEG_E | SEG_F | SEG_G,          // pismeno "H"
+  SEG_D | SEG_E | SEG_F | SEG_G,                  // pismeno "t"
+  SEG_A | SEG_B | SEG_D | SEG_E | SEG_G,          // cislo "2"
+  SEG_A | SEG_B | SEG_D | SEG_E | SEG_G           // cislo "2"
+};
 // same carky na LCD pro potvrzeni smazani EEPROM "----"
 const uint8_t erase[] = {SEG_G, SEG_G, SEG_G, SEG_G};  // znaky "----"
-                             
-
-
+                           
 
 
 void setup() {
-  CURRENT_STATE = 99;                          // 99 = setup sequence
+  CURRENT_STATE = 99;                                           // 99 = setup sequence
   // nastaveni I/O
-  pinMode(BUTTON,INPUT);                       // tlacitko vybaveno externim pull-down => prima logika
-  pinMode(R_LED,OUTPUT);                       // LED diody
+  pinMode(BUTTON,INPUT);                                        // tlacitko vybaveno externim pull-down => prima logika
+  pinMode(R_LED,OUTPUT);                                        // LED diody
   pinMode(G_LED1,OUTPUT);
   pinMode(G_LED2,OUTPUT);
   pinMode(L_LED,OUTPUT);
-  pinMode(DIO,OUTPUT);                         // LCD display
+  pinMode(DIO,OUTPUT);                                          // LCD display
   pinMode(CLK,OUTPUT);
-  pinMode(pinDHT,INPUT);                       // teplomer DHT11
+  pinMode(pinDHT,INPUT);                                        // teplomer DHT11
   // pocatecni stav I/O
-  digitalWrite(R_LED,HIGH);                    // probliknuti vsech diod
+  digitalWrite(R_LED,HIGH);                                     // probliknuti vsech diod
   digitalWrite(G_LED1,HIGH);
   digitalWrite(G_LED2,HIGH);
   digitalWrite(L_LED,HIGH); 
-  mojeDHT.begin();                             // zahajeni komunikace s DHT
-  Serial.begin(9600);                          // otevreni serioveho kanalu pro monitorovani
-  displej.setBrightness(8);                    // nastaveni svitivosti LCD (8(min) - 15(max))
-  delay(500);
+  Serial.begin(9600);                                           // otevreni serioveho kanalu pro monitorovani
+  displej.setBrightness(8);                                     // nastaveni svitivosti LCD (8(min) - 15(max))
+  LOW_TEMP_ALL_TIME = EEPROM.read(ADR_EEPROM_ABSOLUTE_LOW);     // nacti z EEPROM nejnizsi doposud dosazenou teplotu
+  HIGH_TEMP_ALL_TIME = EEPROM.read(ADR_EEPROM_ABSOLUTE_HIGH);   // nacti z EEPROM nejvyssi doposud dosazenou teplotu
+  FIRST_MEASUREMENT = true;
+  UNDERVOLT_ACCU = EEPROM.read(ADR_EEPROM_UNDERVOLT_ACCU);      // nacti z EEPROM rezim detekce podpeti
+  DHT_SENSOR_TYPE = EEPROM.read(ADR_EEPROM_DHTSENZOR_TYPE);     // nacti z EEPROM typ pouziteho DHT senzoru
+  if(DHT_SENSOR_TYPE == 11){                                    // pokud je nactena hodnota "11"
+    mojeDHT11.begin();                                          // zahajeni komunikace s DHT11
+    displej.setSegments(ht11, 4, 0);                            // vypis na LCD typ nacteneho senzoru
+  }else if (DHT_SENSOR_TYPE == 22){                             // pokud je nactena hodnota "22"                    
+    mojeDHT22.begin();                                          // zahajeni komunikace s DHT22
+    displej.setSegments(ht22, 4, 0);                            // vypis na LCD typ nacteneho senzoru
+  }else{                                                        // pokud ani jedna z hodnot "11" nebo "22"
+    DHT_SENSOR_TYPE = 11;                                       // inicializuj do defaultniho nastaveni, tj. DHT11
+    displej.setSegments(ht11, 4, 0);                            // vypis na LCD typ nacteneho senzoru
+    EEPROM.write(ADR_EEPROM_DHTSENZOR_TYPE, DHT_SENSOR_TYPE);   // a zapis defaultni hodnotu do EEPROM pro priste
+  }
+  delay(2000);
   digitalWrite(R_LED,LOW);                  
   digitalWrite(G_LED1,LOW);
   digitalWrite(G_LED2,LOW);
   digitalWrite(L_LED,LOW);
-  LOW_TEMP_ALL_TIME = EEPROM.read(0);          // nacti z EEPROM nejnizsi doposud dosazenou teplotu
-  HIGH_TEMP_ALL_TIME = EEPROM.read(1);         // nacti z EEPROM nejvyssi doposud dosazenou teplotu
-  FIRST_MEASUREMENT = true;
-  UNDERVOLT_ACCU = EEPROM.read(2);             // nacti z EEPROM rezim detekce podpeti
-  attachInterrupt(0, extint_button, RISING);   // nastaveni externiho preruseni na pin D2 co bude volat funkci button
+  CURRENT_STATE = 255;
+  attachInterrupt(0, extint_button, RISING);                    // nastaveni externiho preruseni na pin D2 co bude volat funkci button
 }
+
+
 
 void loop() {
   // pomoci funkcí readTemperature a readHumidity nacteme
@@ -123,14 +152,22 @@ void loop() {
   // ctení trvá cca 250 ms
   digitalWrite(L_LED,HIGH);
   CURRENT_STATE = 0;                                      // 0 = measurement sequence
-  TEP = mojeDHT.readTemperature();
-  VLH = mojeDHT.readHumidity();
+  if(DHT_SENSOR_TYPE == 11){                              // podle typu senzoru aktivuj prislusne instance
+    TEP = mojeDHT11.readTemperature();                    // mereni pres senzor DHT11
+    VLH = mojeDHT11.readHumidity();
+  }else{
+    TEP = mojeDHT22.readTemperature();                    // mereni pres senzor DHT22
+    VLH = mojeDHT22.readHumidity();   
+  }
+  CURRENT_STATE = 255;
   digitalWrite(L_LED,LOW);
 
   if (isnan(TEP) || isnan(VLH)) {                         // kontrola, jestli jsou nactené hodnoty cisla pomocí funkce isnan
+    CURRENT_STATE = 2;                                     // 2 = error state 2
     Serial.print("porucha senzoru: DHT");                 // pokud ne, vypis chybu na seriovy terminal
-    Serial.println(typDHT);
+    Serial.println(DHT_SENSOR_TYPE);
     displej.setSegments(ERR2);                            // a vypise chybu "Err2" na LCD display
+    delay(3000);
     return;
   }
   Serial.print("teplota: ");                              // vypis namerenych hodnot na seriovy terminal
@@ -184,13 +221,13 @@ if (CURRENT_TEMP_INT > HIGH_TEMP_INTERVAL){              // pokud byla prekrocen
   digitalWrite(G_LED1,LOW);
 
 // porovnani teploty s absolutnim minimem a maximem, ktere jsou ulozeny v EEPROM a jejich vypis na LCD
-  if (CURRENT_TEMP_INT < LOW_TEMP_ALL_TIME){               // pokud je prekonana historicky nejnizsi teplota
-    EEPROM.write(0, CURRENT_TEMP_INT);                     // zapis ji do pameti EEPROM na adresu 0
-    LOW_TEMP_ALL_TIME = CURRENT_TEMP_INT;                  // zapis ji do RAM pro dalsi beh programu do restartu
+  if (CURRENT_TEMP_INT < LOW_TEMP_ALL_TIME){                     // pokud je prekonana historicky nejnizsi teplota
+    EEPROM.write(ADR_EEPROM_ABSOLUTE_LOW, CURRENT_TEMP_INT);     // zapis ji do pameti EEPROM na adresu 0
+    LOW_TEMP_ALL_TIME = CURRENT_TEMP_INT;                        // zapis ji do RAM pro dalsi beh programu do restartu
   }
-  if (CURRENT_TEMP_INT > HIGH_TEMP_ALL_TIME){              // pokud je prekonana historicky nejvyssi teplota
-    EEPROM.write(1, CURRENT_TEMP_INT);                     // zapis ji do pameti EEPROM na adresu 1
-    HIGH_TEMP_ALL_TIME = CURRENT_TEMP_INT;                 // zapis ji do RAM pro dalsi beh programu do restartu
+  if (CURRENT_TEMP_INT > HIGH_TEMP_ALL_TIME){                    // pokud je prekonana historicky nejvyssi teplota
+    EEPROM.write(ADR_EEPROM_ABSOLUTE_HIGH, CURRENT_TEMP_INT);    // zapis ji do pameti EEPROM na adresu 2
+    HIGH_TEMP_ALL_TIME = CURRENT_TEMP_INT;                       // zapis ji do RAM pro dalsi beh programu do restartu
   }
   digitalWrite(G_LED2,HIGH);
   zapis_LCD(0,LOW_TEMP_ALL_TIME);
@@ -208,41 +245,67 @@ if (CURRENT_TEMP_INT > HIGH_TEMP_INTERVAL){              // pokud byla prekrocen
 
 
 void extint_button(){
-  detachInterrupt(0);                           // deaktivuje dalsi preruseni
-  if(digitalRead(BUTTON) == HIGH){              // je stale stisknuto tlacitko ?
+  detachInterrupt(0);                                              // deaktivuje dalsi preruseni
+  if(digitalRead(BUTTON) == HIGH){                                 // je stale stisknuto tlacitko ?
     switch (CURRENT_STATE){
-      case 11:                                  // zrovna se vypisovala aktualni vlhkost
-        UNDERVOLT_ACCU = !UNDERVOLT_ACCU;       // zmen rezim detekce podpeti
-        EEPROM.write(2, UNDERVOLT_ACCU);        // zapis novy rezim do EEPROM
-        if(UNDERVOLT_ACCU == true){
-          displej.setSegments(accu, 4, 0);      // vypis na LCD "Accu"
+      case 2:                                                     // zrovna se vypisovala chyba Err2 - porucha senzoru
+        if(DHT_SENSOR_TYPE == 11){
+          DHT_SENSOR_TYPE = 22;
+          EEPROM.write(ADR_EEPROM_DHTSENZOR_TYPE, DHT_SENSOR_TYPE);
+          mojeDHT22.begin();                                          // zahajeni komunikace s DHT22
+          displej.setSegments(ht22, 4, 0);
         }else{
-          displej.setSegments(lipo, 4, 0);      // vypis na LCD "LiPo"
+          DHT_SENSOR_TYPE = 11;
+          EEPROM.write(ADR_EEPROM_DHTSENZOR_TYPE, DHT_SENSOR_TYPE);
+          mojeDHT11.begin();                                          // zahajeni komunikace s DHT11
+          displej.setSegments(ht11, 4, 0);
+        }
+        break;      
+      case 10:                                                     // zrovna se vypisovala aktualni teplota
+        if(DHT_SENSOR_TYPE == 11){
+          DHT_SENSOR_TYPE = 22;
+          EEPROM.write(ADR_EEPROM_DHTSENZOR_TYPE, DHT_SENSOR_TYPE);
+          mojeDHT22.begin();                                          // zahajeni komunikace s DHT22
+          displej.setSegments(ht22, 4, 0);
+        }else{
+          DHT_SENSOR_TYPE = 11;
+          EEPROM.write(ADR_EEPROM_DHTSENZOR_TYPE, DHT_SENSOR_TYPE);
+          mojeDHT11.begin();                                          // zahajeni komunikace s DHT11
+          displej.setSegments(ht11, 4, 0);
+        }
+        break;
+      case 11:                                                     // zrovna se vypisovala aktualni vlhkost
+        UNDERVOLT_ACCU = !UNDERVOLT_ACCU;                          // zmen rezim detekce podpeti
+        EEPROM.write(ADR_EEPROM_UNDERVOLT_ACCU, UNDERVOLT_ACCU);   // zapis novy rezim do EEPROM
+        if(UNDERVOLT_ACCU == true){
+          displej.setSegments(accu, 4, 0);                         // vypis na LCD "Accu"
+        }else{
+          displej.setSegments(lipo, 4, 0);                         // vypis na LCD "LiPo"
         }
       break;      
-      case 20:                                  // zrovna se vypisovala nejnizsi teplota za INTERVAL
-        displej.setSegments(erase, 4, 0);       // vypis na LCD "----"
-        LOW_TEMP_INTERVAL = CURRENT_TEMP_INT;   // znovu inicializuj nejnizsi teplotu za INTERVAL podle aktualni
+      case 20:                                                     // zrovna se vypisovala nejnizsi teplota za INTERVAL
+        displej.setSegments(erase, 4, 0);                          // vypis na LCD "----"
+        LOW_TEMP_INTERVAL = CURRENT_TEMP_INT;                      // znovu inicializuj nejnizsi teplotu za INTERVAL podle aktualni
       break; 
-      case 21:                                  // zrovna se vypisovala nejvyssi teplota za INTERVAL
-        displej.setSegments(erase, 4, 0);       // vypis na LCD "----"
-        HIGH_TEMP_INTERVAL = CURRENT_TEMP_INT;  // znovu inicializuj nejnizsi teplotu za INTERVAL podle aktualni
+      case 21:                                                     // zrovna se vypisovala nejvyssi teplota za INTERVAL
+        displej.setSegments(erase, 4, 0);                          // vypis na LCD "----"
+        HIGH_TEMP_INTERVAL = CURRENT_TEMP_INT;                     // znovu inicializuj nejnizsi teplotu za INTERVAL podle aktualni
       break;      
-      case 30:                                   // zrovna se vypisovala nejnizsi absolutni namerena hodnota
-        displej.setSegments(erase, 4, 0);        // vypis na LCD "----"
-        EEPROM.write(0, CURRENT_TEMP_INT);       // znovu inicializuj nejnizsi absolutni teplotu z EEPROM podle aktualni
-        LOW_TEMP_ALL_TIME = CURRENT_TEMP_INT;    // aktualizuj promennou pro nejnizsi absolutni hodnotu teploty
+      case 30:                                                     // zrovna se vypisovala nejnizsi absolutni namerena hodnota
+        displej.setSegments(erase, 4, 0);                          // vypis na LCD "----"
+        EEPROM.write(ADR_EEPROM_ABSOLUTE_LOW, CURRENT_TEMP_INT);   // znovu inicializuj nejnizsi absolutni teplotu z EEPROM podle aktualni
+        LOW_TEMP_ALL_TIME = CURRENT_TEMP_INT;                      // aktualizuj promennou pro nejnizsi absolutni hodnotu teploty
       break;
-      case 31:                                   // zrovna se vypisovala nejvyssi absolutni namerena hodnota
-        displej.setSegments(erase, 4, 0);        // vypis na LCD "----"
-        EEPROM.write(1, CURRENT_TEMP_INT);       // znovu inicializuj nejvyssi absolutni teplotu z EEPROM podle aktualni
-        HIGH_TEMP_ALL_TIME = CURRENT_TEMP_INT;   // aktualizuj promennou pro nejvyssi absolutni hodnotu teploty
+      case 31:                                                     // zrovna se vypisovala nejvyssi absolutni namerena hodnota
+        displej.setSegments(erase, 4, 0);                          // vypis na LCD "----"
+        EEPROM.write(ADR_EEPROM_ABSOLUTE_HIGH, CURRENT_TEMP_INT);  // znovu inicializuj nejvyssi absolutni teplotu z EEPROM podle aktualni
+        HIGH_TEMP_ALL_TIME = CURRENT_TEMP_INT;                     // aktualizuj promennou pro nejvyssi absolutni hodnotu teploty
       break;
     default:
       break;
     }
   }
-  attachInterrupt(0, extint_button, RISING);    // znovu aktivuje preruseni
+  attachInterrupt(0, extint_button, RISING);                       // znovu aktivuje preruseni
 }
 
 
